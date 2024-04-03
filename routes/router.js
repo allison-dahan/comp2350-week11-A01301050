@@ -1,5 +1,7 @@
 const router = require("express").Router();
 const database = include("databaseConnection");
+const { ObjectId } = require("mongodb");
+const Joi = require("joi");
 //const dbModel = include('databaseAccessLayer');
 //const dbModel = include('staticData');
 
@@ -33,96 +35,109 @@ router.get("/", async (req, res) => {
   }
 });
 
+
+
 router.get("/pets", async (req, res) => {
   console.log("page hit");
+  const schema = Joi.string().max(10).required();
+
+  // Validate the query parameter 'id' against the schema
+  const validationResult = schema.validate(req.query.id);
+
+  // If there's an error in the validation result, log it and send an error response
+  if (validationResult.error != null) {
+    console.log(validationResult.error);
+    res.status(400).send(validationResult.error.details[0].message);
+    return;
+  }
   try {
-    const pets = await petModel.findAll({ attributes: ["name"] }); //{where: {web_user_id: 1}}
-    if (pets === null) {
-      res.render("error", { message: "Error connecting to MySQL" });
-      console.log("Error connecting to userModel");
-    } else {
-      console.log(pets);
-      res.render("pets", { allPets: pets });
-    }
+	const petCollection = database.db('lab_example').collection('pets');
+	const pets = await petCollection.find({"_id": ObjectId(req.query.id)}).toArray();
+  
+	if (pets.length === 0) {
+	  res.render("error", { message: "No pets found with the provided id" });
+	  console.log("No pets found with the provided id");
+	} else {
+	  console.log(pets);
+	  res.render("pets", { allPets: pets });
+	}
   } catch (ex) {
-    res.render("error", { message: "Error connecting to MySQL" });
-    console.log("Error connecting to MySQL");
-    console.log(ex);
+	res.render("error", { message: "Error connecting to MongoDB" });
+	console.log("Error connecting to MongoDB");
+	console.log(ex);
   }
 });
 
-router.get("/showPets", async (req, res) => {
-  console.log("page hit");
-  try {
-    let userId = req.query.id;
-    const user = await userModel.findByPk(userId);
-    if (user === null) {
-      res.render("error", { message: "Error connecting to MySQL" });
-      console.log("Error connecting to userModel");
-    } else {
-      let pets = await user.getPets();
-      console.log(pets);
-      let owner = await pets[0].getOwner();
-      console.log(owner);
+// router.get("/showPets", async (req, res) => {
+//   console.log("page hit");
+//   try {
+//     let userId = req.query.id;
+//     const user = await userModel.findByPk(userId);
+//     if (user === null) {
+//       res.render("error", { message: "Error connecting to MySQL" });
+//       console.log("Error connecting to userModel");
+//     } else {
+//       let pets = await user.getPets();
+//       console.log(pets);
+//       let owner = await pets[0].getOwner();
+//       console.log(owner);
 
-      res.render("pets", { allPets: pets });
-    }
-  } catch (ex) {
-    res.render("error", { message: "Error connecting to MySQL" });
-    console.log("Error connecting to MySQL");
-    console.log(ex);
-  }
-});
+//       res.render("pets", { allPets: pets });
+//     }
+//   } catch (ex) {
+//     res.render("error", { message: "Error connecting to MySQL" });
+//     console.log("Error connecting to MySQL");
+//     console.log(ex);
+//   }
+// });
 
 router.get("/deleteUser", async (req, res) => {
-  try {
-    console.log("delete user");
-
-    let userId = req.query.id;
-    if (userId) {
-      console.log("userId: " + userId);
-      let deleteUser = await userModel.findByPk(userId);
-      console.log("deleteUser: ");
-      console.log(deleteUser);
-      if (deleteUser !== null) {
-        await deleteUser.destroy();
-      }
+    try {
+        const schema = Joi.string().max(26).required();
+        const validationResult = schema.validate(req.query.id);
+        if (validationResult.error) {
+            throw new Error(validationResult.error.details[0].message);
+        }
+        const userId = new ObjectId(req.query.id);
+        const userCollection = database.db("lab_example").collection("users");
+        const result = await userCollection.deleteOne({ _id: userId });
+        if (result.deletedCount === 1) {
+            console.log("User deleted:", userId);
+        } else {
+            console.log("User not found:", userId);
+        }
+        res.redirect("/");
+    } catch (error) {
+        console.error("Error deleting user:", error);
+        res.status(400).send(error.message);
     }
-    res.redirect("/");
-  } catch (ex) {
-    res.render("error", { message: "Error connecting to MySQL" });
-    console.log("Error connecting to MySQL");
-    console.log(ex);
-  }
 });
 
 router.post("/addUser", async (req, res) => {
-  try {
-    console.log("form submit");
-
-    const password_salt = crypto.createHash("sha512");
-
-    password_salt.update(uuid());
-
-    const password_hash = crypto.createHash("sha512");
-
-    password_hash.update(req.body.password + passwordPepper + password_salt);
-
-    let newUser = userModel.build({
-      first_name: req.body.first_name,
-      last_name: req.body.last_name,
-      email: req.body.email,
-      password_salt: password_salt.digest("hex"),
-      password_hash: password_hash.digest("hex"),
-    });
-    await newUser.save();
-    res.redirect("/");
-  } catch (ex) {
-    res.render("error", { message: "Error connecting to MySQL" });
-    console.log("Error connecting to MySQL");
-    console.log(ex);
-  }
-});
+	try {
+	  // Validate user input using Joi
+	  const schema = Joi.object({
+		first_name: Joi.string().required(),
+		last_name: Joi.string().required(),
+		email: Joi.string().email().required(),
+		password: Joi.string().required(),
+	  });
+	  const validationResult = schema.validate(req.body);
+	  if (validationResult.error) {
+		throw new Error(validationResult.error.details[0].message);
+	  }
+  
+	  // Insert user into the database
+	  const newUser = req.body;
+	  const userCollection = database.db("lab_example").collection("users");
+	  const result = await userCollection.insertOne(newUser);
+	  console.log("User added:", result.insertedId);
+	  res.redirect("/");
+	} catch (error) {
+	  console.error("Error adding user:", error);
+	  res.render("error", { message: "Error adding user: " + error.message });
+	}
+  });
 
 /*
 router.get('/', (req, res) => {
